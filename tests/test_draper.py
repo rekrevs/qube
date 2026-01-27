@@ -1,8 +1,11 @@
 """Tests for Draper QFT Adder."""
 
+import numpy as np
 import pytest
 
-from qube import reset
+from qube import reset, pushQubit, applyGate, get_state
+from qube.core import tosQubit
+from qube.gates import H_gate
 from qube.draper import (
     draper_add_constant,
     draper_add,
@@ -244,3 +247,146 @@ class TestEdgeCases:
 
         result_a = measure_register(a_qubits)
         assert result_a == 0, "1 + 1 mod 2 = 0"
+
+
+class TestQuantumBehavior:
+    """Tests that verify true quantum behavior (superposition, entanglement).
+
+    These tests would FAIL if the implementation "cheated" by measuring
+    the input and performing classical addition.
+    """
+
+    def test_addition_with_superposition_creates_entanglement(self):
+        """Adding a register in superposition should create entanglement.
+
+        Setup:
+            a = |1⟩ (2-bit register: |01⟩)
+            b = (|0⟩ + |1⟩)/√2 (1-bit register in superposition)
+
+        After draper_add(a, b):
+            |a⟩|b⟩ → |a+b⟩|b⟩
+
+        Expected result:
+            (|1+0⟩|0⟩ + |1+1⟩|1⟩)/√2 = (|01⟩|0⟩ + |10⟩|1⟩)/√2
+
+        This is an entangled state. A classical cheat (measure b, add classically)
+        would produce a mixed state, not this pure entangled state.
+        """
+        reset()
+
+        # a = 2-bit register initialized to |1⟩ = |01⟩
+        a_qubits = init_register("a", 1, n_bits=2)
+
+        # b = 1-bit register in superposition (|0⟩ + |1⟩)/√2
+        pushQubit("b0", [1, 0])
+        applyGate(H_gate, "b0")
+        b_qubits = ["b0"]
+
+        # Quantum addition: |a⟩|b⟩ → |a+b⟩|b⟩
+        draper_add(a_qubits, b_qubits)
+
+        # Normalize qubit order for correct state readout
+        for q in a_qubits + b_qubits:
+            tosQubit(q)
+
+        state = get_state()
+
+        # Expected: (|01⟩|0⟩ + |10⟩|1⟩)/√2 = (|010⟩ + |101⟩)/√2
+        # State vector indices for |a0, a1, b0⟩:
+        #   |010⟩ = 0*4 + 1*2 + 0 = 2  (a=1, b=0)
+        #   |101⟩ = 1*4 + 0*2 + 1 = 5  (a=2, b=1)
+        expected = np.zeros(8, dtype=complex)
+        expected[2] = 1 / np.sqrt(2)  # |010⟩: a=1, b=0
+        expected[5] = 1 / np.sqrt(2)  # |101⟩: a=2, b=1
+
+        # Check amplitudes match (allowing for global phase)
+        assert np.allclose(np.abs(state), np.abs(expected)), (
+            f"Expected entangled state (|010⟩ + |101⟩)/√2.\n"
+            f"Got amplitudes: {np.round(np.abs(state), 4)}\n"
+            f"Expected amplitudes: {np.round(np.abs(expected), 4)}"
+        )
+
+        # Verify exactly 2 non-zero amplitudes (pure entangled state)
+        nonzero_count = np.sum(np.abs(state) > 1e-10)
+        assert nonzero_count == 2, (
+            f"Expected exactly 2 non-zero amplitudes for entangled state, got {nonzero_count}"
+        )
+
+    def test_superposition_preserved_in_both_registers(self):
+        """Both registers in superposition should produce 4-way entanglement.
+
+        Setup:
+            a = (|0⟩ + |1⟩)/√2 (1-bit)
+            b = (|0⟩ + |1⟩)/√2 (1-bit)
+
+        After draper_add(a, b):
+            (|0+0⟩|0⟩ + |0+1⟩|1⟩ + |1+0⟩|0⟩ + |1+1⟩|1⟩)/2
+            = (|0⟩|0⟩ + |1⟩|1⟩ + |1⟩|0⟩ + |0⟩|1⟩)/2   (mod 2 for single bit)
+            = (|00⟩ + |11⟩ + |10⟩ + |01⟩)/2
+            = all 4 basis states with equal amplitude
+        """
+        reset()
+
+        # a = 1-bit in superposition
+        pushQubit("a0", [1, 0])
+        applyGate(H_gate, "a0")
+        a_qubits = ["a0"]
+
+        # b = 1-bit in superposition
+        pushQubit("b0", [1, 0])
+        applyGate(H_gate, "b0")
+        b_qubits = ["b0"]
+
+        draper_add(a_qubits, b_qubits)
+
+        for q in a_qubits + b_qubits:
+            tosQubit(q)
+
+        state = get_state()
+
+        # All 4 basis states should have equal probability (1/4 each)
+        probs = np.abs(state) ** 2
+        expected_probs = np.ones(4) / 4
+
+        assert np.allclose(probs, expected_probs), (
+            f"Expected uniform distribution over 4 states.\n"
+            f"Got probabilities: {np.round(probs, 4)}"
+        )
+
+    def test_correlation_in_measurements(self):
+        """Statistical test: measurements should show quantum correlations.
+
+        For the entangled state (|01⟩|0⟩ + |10⟩|1⟩)/√2:
+        - When b=0, a must be 1
+        - When b=1, a must be 2
+
+        A classical cheat would sometimes give wrong correlations.
+        """
+        n_trials = 100
+        correlations_correct = 0
+
+        for _ in range(n_trials):
+            reset()
+
+            a_qubits = init_register("a", 1, n_bits=2)
+            pushQubit("b0", [1, 0])
+            applyGate(H_gate, "b0")
+            b_qubits = ["b0"]
+
+            draper_add(a_qubits, b_qubits)
+
+            # Measure both registers
+            for q in a_qubits + b_qubits:
+                tosQubit(q)
+
+            a_val = measure_register(a_qubits)
+            b_val = measure_register(b_qubits)
+
+            # Check correlation: a should equal 1 + b
+            if a_val == 1 + b_val:
+                correlations_correct += 1
+
+        # All measurements should show perfect correlation
+        assert correlations_correct == n_trials, (
+            f"Expected 100% correlation (a = 1 + b), got {correlations_correct}/{n_trials}"
+        )
