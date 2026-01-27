@@ -97,12 +97,10 @@ from .grover import (
     zero_phase_oracle,
 )
 
-from .shor import (
-    shor_factor_15,
-    shor_factor_15_multiple_runs,
-    controlled_multiply_7_mod15,
-    controlled_multiply_4_mod15,
-    verify_modular_multiplication,
+from .shor_quantum import (
+    shor_factor,
+    controlled_mod_mult,
+    compute_register_sizes,
 )
 
 # Draper QFT Adder
@@ -174,11 +172,9 @@ __all__ = [
     "diffusion_operator",
     "zero_phase_oracle",
     # Shor
-    "shor_factor_15",
-    "shor_factor_15_multiple_runs",
-    "controlled_multiply_7_mod15",
-    "controlled_multiply_4_mod15",
-    "verify_modular_multiplication",
+    "shor_factor",
+    "controlled_mod_mult",
+    "compute_register_sizes",
     # Draper Adder
     "draper_add",
     "draper_add_constant",
