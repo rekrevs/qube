@@ -299,11 +299,9 @@ class TestShorFactorPure:
     @pytest.mark.parametrize(
         "N,factors",
         [
-            pytest.param(15, {3, 5}, marks=pytest.mark.skip(
-                reason="Shift-and-add too slow for full Shor (O(n²) QFTs per mult)"
-            )),
+            pytest.param(15, {3, 5}, marks=pytest.mark.timeout(600)),  # ~160s per attempt
             pytest.param(21, {3, 7}, marks=pytest.mark.skip(
-                reason="Shift-and-add too slow for full Shor (O(n²) QFTs per mult)"
+                reason="N=21 would take 30-50 min per attempt"
             )),
         ],
         ids=["N=15", "N=21"],
