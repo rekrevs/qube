@@ -10,3 +10,38 @@
 The project contains annotated Python for the report [How to program your own quantum computer simulator or QUBE: QUantum computing for BEginners](https://arxiv.org/abs/2312.06624) available on arXiv with URI [DOI:10.48550/arXiv.2312.06624](https://doi.org/10.48550/arXiv.2312.06624) or short URI [DOI:10/k8hd](https://doi.org/k8hd).
 
 The code was developed by [Martin Nilsson](https://www.ri.se/en/person/martin-nilsson) at [RISE Research Institutes of Sweden](https://www.ri.se/en), Computer Systems Unit. It comes in the form of a Jupyter Notebook, originally using Python version 3.11.5 and PyTorch version 2.1.1.
+
+## The `qube` Package
+
+Beyond the educational notebook, this repository includes a `qube/` Python package with reusable quantum simulation modules:
+
+| Module | Description |
+|--------|-------------|
+| `core.py` | State-vector simulator with stack-based qubit management |
+| `gates.py` | Standard quantum gates (H, X, Y, Z, CNOT, Toffoli, etc.) |
+| `qft.py` | Quantum Fourier Transform |
+| `draper.py` | Draper QFT-based arithmetic (addition in Fourier basis) |
+| `grover.py` | Grover's search algorithm |
+| `shor_quantum.py` | Shor's algorithm using permutation cycles |
+| `shor_pure.py` | Shor's algorithm using shift-and-add multiplication |
+| `utils.py` | Classical number theory helpers (GCD, modular inverse, etc.) |
+
+### Usage
+
+```python
+from qube import reset, pushQubit, applyGate, measureQubit
+from qube.gates import H_gate, CNOT_gate
+
+reset()
+pushQubit("q0", [1, 0])
+pushQubit("q1", [1, 0])
+applyGate(H_gate, "q0")
+applyGate(CNOT_gate, "q0", "q1")
+# Now q0 and q1 are entangled in Bell state
+```
+
+### Running Tests
+
+```bash
+pytest tests/ -v
+```
