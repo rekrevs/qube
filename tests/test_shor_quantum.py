@@ -36,57 +36,6 @@ class TestRegisterSizing:
         assert control_size == expected_control, f"Control register for N={N}"
 
 
-class TestModularArithmetic:
-    """Tests for quantum modular arithmetic using Draper adder."""
-
-    @pytest.mark.parametrize(
-        "a,b,N,expected",
-        [
-            (3, 5, 15, 8),    # 3 + 5 = 8 < 15, no reduction
-            (10, 7, 15, 2),   # 10 + 7 = 17 mod 15 = 2
-            (14, 1, 15, 0),   # 14 + 1 = 15 mod 15 = 0
-            (5, 10, 21, 15),  # 5 + 10 = 15 < 21, no reduction
-            (15, 10, 21, 4),  # 15 + 10 = 25 mod 21 = 4
-        ],
-        ids=["no_reduction", "reduction_15", "exact_mod", "no_reduction_21", "reduction_21"],
-    )
-    def test_modular_add_constant(self, a: int, b: int, N: int, expected: int):
-        """(a + b) mod N computed quantumly."""
-        from qube.shor_quantum import modular_add_constant
-
-        n_bits = math.ceil(math.log2(N)) + 1  # Extra bit for overflow detection
-
-        reset()
-        qubits = init_register("a", a, n_bits=n_bits)
-        modular_add_constant(qubits, b, N)
-
-        result = measure_register(qubits)
-        assert result == expected, f"{a} + {b} mod {N} = {result}, expected {expected}"
-
-    @pytest.mark.parametrize(
-        "a,b,N,expected",
-        [
-            (8, 3, 15, 5),    # 8 - 3 = 5
-            (2, 5, 15, 12),   # 2 - 5 = -3 mod 15 = 12
-            (0, 1, 15, 14),   # 0 - 1 = -1 mod 15 = 14
-            (4, 10, 21, 15),  # 4 - 10 = -6 mod 21 = 15
-        ],
-        ids=["no_borrow", "borrow_15", "zero_borrow", "borrow_21"],
-    )
-    def test_modular_subtract_constant(self, a: int, b: int, N: int, expected: int):
-        """(a - b) mod N computed quantumly."""
-        from qube.shor_quantum import modular_subtract_constant
-
-        n_bits = math.ceil(math.log2(N)) + 1
-
-        reset()
-        qubits = init_register("a", a, n_bits=n_bits)
-        modular_subtract_constant(qubits, b, N)
-
-        result = measure_register(qubits)
-        assert result == expected, f"{a} - {b} mod {N} = {result}, expected {expected}"
-
-
 class TestControlledModMult:
     """Tests for controlled a*x mod N."""
 

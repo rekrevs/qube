@@ -9,7 +9,7 @@ managed via a name stack that allows referencing qubits by name.
 """
 
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple
 
 # Global state
 workspace: np.ndarray = np.array([[1.0 + 0j]])
@@ -225,9 +225,19 @@ def TOFFn(controls: List[str], result: str):
     Multi-controlled Toffoli: result = result XOR AND(controls).
 
     Uses ancilla qubits for cascading.
+
+    Special cases:
+    - 0 controls: unconditional X (NOT) on result
+    - 1 control: CNOT
+    - 2 controls: standard Toffoli
+    - 3+ controls: cascade of Toffolis with ancillas
     """
     from .gates import TOFF_gate
 
+    if len(controls) == 0:
+        from .gates import X_gate
+        applyGate(X_gate, result)
+        return
     if len(controls) == 1:
         from .gates import CNOT_gate
         applyGate(CNOT_gate, controls[0], result)

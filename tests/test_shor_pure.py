@@ -329,3 +329,85 @@ class TestShorFactorPure:
         N = 15
         successes = sum(1 for _ in range(10) if shor_factor_pure(N) is not None)
         assert successes >= 3, f"Success rate {successes}/10 too low"
+
+
+class TestCoherencePreservation:
+    """Tests that verify quantum coherence is preserved after subtraction.
+
+    The key test for the subtraction bug fix: when the control qubit is in
+    superposition, modular subtraction must preserve that superposition
+    (creating entanglement) rather than collapsing the control qubit.
+    """
+
+    @pytest.mark.parametrize(
+        "N,x,c",
+        [
+            (15, 8, 5),   # 8 - 5 = 3 mod 15 (no wrap)
+            (15, 3, 5),   # 3 - 5 = -2 = 13 mod 15 (wrap)
+            (21, 10, 7),  # 10 - 7 = 3 mod 21 (no wrap)
+            (21, 3, 7),   # 3 - 7 = -4 = 17 mod 21 (wrap)
+        ],
+        ids=["N15_no_wrap", "N15_wrap", "N21_no_wrap", "N21_wrap"],
+    )
+    def test_subtraction_preserves_superposition(self, N: int, x: int, c: int):
+        """Controlled subtraction with control in |+> creates proper entanglement.
+
+        Setup: ctrl = H|0⟩ = (|0⟩+|1⟩)/√2, register = |x⟩
+        After controlled_modular_subtract_constant(ctrl, register, c, N):
+            (|0⟩|x⟩ + |1⟩|(x-c) mod N⟩)/√2
+
+        This must be a coherent superposition with exactly 2 non-zero amplitudes.
+        The bug caused the ancilla to not uncompute properly, collapsing the state.
+        """
+        from qube.shor_pure import controlled_modular_subtract_constant
+
+        n_bits = math.ceil(math.log2(N)) + 1
+
+        reset()
+
+        # Control in superposition |+⟩ = (|0⟩+|1⟩)/√2
+        pushQubit("ctrl", [1, 0])
+        applyGate(H_gate, "ctrl")
+
+        # Register = |x⟩
+        qubits = init_register("a", x, n_bits=n_bits)
+
+        # Apply controlled subtraction
+        controlled_modular_subtract_constant("ctrl", qubits, c, N)
+
+        # Normalize qubit order for state inspection
+        tosQubit("ctrl")
+        for q in qubits:
+            tosQubit(q)
+
+        state = get_state()
+
+        # Must have exactly 2 non-zero amplitudes (entangled state)
+        nonzero_indices = np.where(np.abs(state) > 1e-10)[0]
+        assert len(nonzero_indices) == 2, (
+            f"Expected 2 non-zero amplitudes for coherent superposition, "
+            f"got {len(nonzero_indices)}. Ancilla likely not uncomputed."
+        )
+
+        # Both amplitudes should have magnitude 1/√2
+        for idx in nonzero_indices:
+            assert np.isclose(np.abs(state[idx]), 1/np.sqrt(2), atol=1e-6), (
+                f"Amplitude should be 1/√2 ≈ 0.707, got {np.abs(state[idx])}"
+            )
+
+        # Verify correct state values: {(ctrl=0, x), (ctrl=1, (x-c) mod N)}
+        expected_result = (x - c) % N
+        total_qubits = 1 + n_bits  # ctrl + register
+
+        # Decode the two states
+        decoded_states = set()
+        for idx in nonzero_indices:
+            # State index encodes (ctrl, register) with ctrl as MSB
+            ctrl_bit = (idx >> n_bits) & 1
+            reg_value = idx & ((1 << n_bits) - 1)
+            decoded_states.add((ctrl_bit, reg_value))
+
+        expected_states = {(0, x), (1, expected_result)}
+        assert decoded_states == expected_states, (
+            f"State values mismatch. Got {decoded_states}, expected {expected_states}"
+        )

@@ -2,28 +2,24 @@
 Generalized Quantum Shor's Algorithm.
 
 This module implements Shor's factoring algorithm for arbitrary N,
-using Draper QFT adders for quantum modular arithmetic.
+using permutation cycles for controlled modular multiplication.
 
 Key components:
-- Modular addition/subtraction using Draper adders with overflow detection
 - Controlled modular multiplication via permutation cycles
 - Full Shor's algorithm with quantum phase estimation
 
 References:
 - Beauregard, "Circuit for Shor's algorithm using 2n+3 qubits", 2002
-- Draper, "Addition on a Quantum Computer", 2000
 """
 
 import math
 import random
 from typing import List, Tuple, Optional
 
-import numpy as np
-
 from .core import applyGate, pushQubit, measureQubit, reset, tosQubit
-from .gates import H_gate, X_gate, CNOT_gate, CP_gate, TOFF_gate
-from .qft import QFT, QFT_inverse
-from .draper import phi_add_constant, init_register
+from .gates import H_gate, X_gate, CNOT_gate, TOFF_gate
+from .qft import QFT_inverse
+from .draper import init_register
 from .utils import gcd, is_coprime, extract_period
 
 
@@ -46,158 +42,6 @@ def compute_register_sizes(N: int) -> Tuple[int, int]:
     work_size = math.ceil(math.log2(N))
     control_size = 2 * work_size
     return (work_size, control_size)
-
-
-# =============================================================================
-# Modular arithmetic using Draper adders
-# =============================================================================
-
-def modular_add_constant(qubits: List[str], constant: int, N: int):
-    """
-    Add a constant to a quantum register modulo N.
-
-    Computes: |a> -> |a + constant mod N>
-
-    Algorithm:
-    1. Add constant (result is a + constant mod 2^n)
-    2. Subtract N
-    3. Check sign bit (MSB) - if negative, we need to add N back
-    4. Controlled on sign=1, add N
-    5. Reset the sign bit
-
-    The register must have at least ceil(log2(N)) + 1 bits for overflow detection.
-
-    Args:
-        qubits: List of qubit names [MSB, ..., LSB] with extra overflow bit
-        constant: Classical integer to add (0 <= constant < N)
-        N: Modulus
-    """
-    n = len(qubits)
-
-    # Step 1: Add constant using Draper adder
-    # Transform to Fourier basis
-    QFT(qubits)
-    for q in qubits:
-        tosQubit(q)
-
-    # Add constant in Fourier basis
-    phi_add_constant(qubits, constant)
-
-    # Step 2: Subtract N in Fourier basis
-    phi_add_constant(qubits, N, inverse=True)
-
-    # Step 3: Return to computational basis to check sign
-    QFT_inverse(qubits)
-    for q in qubits:
-        tosQubit(q)
-
-    # The MSB (qubits[0]) is now the sign bit
-    # If the result is negative (wrapped around), MSB = 1, meaning we need to add N back
-
-    # Step 4: Create ancilla to store sign, then conditionally add N
-    pushQubit("_mod_anc", [1, 0])
-
-    # Copy MSB to ancilla
-    applyGate(CNOT_gate, qubits[0], "_mod_anc")
-
-    # Transform back to Fourier basis for conditional add
-    QFT(qubits)
-    for q in qubits:
-        tosQubit(q)
-    tosQubit("_mod_anc")
-
-    # Controlled add N (controlled on ancilla being 1)
-    # We use controlled phase rotations
-    for j in range(n):
-        divisor = 2 ** (j + 1)
-        theta = 2 * np.pi * N / divisor
-        applyGate(CP_gate(theta), "_mod_anc", qubits[j])
-
-    # Step 5: Return to computational basis
-    QFT_inverse(qubits)
-    for q in qubits:
-        tosQubit(q)
-    tosQubit("_mod_anc")
-
-    # Step 6: Uncompute the ancilla
-    # The ancilla should now be in state that can be uncomputed
-    # After adding N back, if ancilla was 1, the MSB should be 0 now
-    # We XOR ancilla with NOT(MSB) to reset it
-
-    # Actually, let's think about this more carefully:
-    # - If a + constant < N: after -N, result is negative (MSB=1), ancilla=1, add N -> result correct, MSB=0
-    # - If a + constant >= N: after -N, result is non-negative (MSB=0), ancilla=0, no add -> result correct
-
-    # To uncompute ancilla: it equals the original sign bit (before adding N back)
-    # After adding N back, the sign bit should be 0 in all valid cases
-    # So we can just CNOT with current MSB (which should be 0) - but that's not right
-
-    # The standard approach: the ancilla now holds the "borrow" bit
-    # We need to uncompute it by reversing the operations with -constant instead
-
-    # Simpler approach: just measure and discard the ancilla
-    # This works for our simulation but breaks reversibility
-    measureQubit("_mod_anc")
-
-
-def modular_subtract_constant(qubits: List[str], constant: int, N: int):
-    """
-    Subtract a constant from a quantum register modulo N.
-
-    Computes: |a> -> |a - constant mod N>
-
-    Algorithm:
-    1. Subtract constant (result is a - constant mod 2^n)
-    2. Check sign bit - if negative, add N
-    3. Reset sign bit
-
-    Args:
-        qubits: List of qubit names [MSB, ..., LSB] with extra overflow bit
-        constant: Classical integer to subtract (0 <= constant < N)
-        N: Modulus
-    """
-    n = len(qubits)
-
-    # Step 1: Subtract constant using Draper adder
-    QFT(qubits)
-    for q in qubits:
-        tosQubit(q)
-
-    # Subtract constant in Fourier basis
-    phi_add_constant(qubits, constant, inverse=True)
-
-    # Return to computational basis to check sign
-    QFT_inverse(qubits)
-    for q in qubits:
-        tosQubit(q)
-
-    # Step 2: Check sign and conditionally add N
-    # MSB = 1 means negative (underflow), need to add N
-    pushQubit("_mod_anc", [1, 0])
-
-    # Copy MSB (sign) to ancilla
-    applyGate(CNOT_gate, qubits[0], "_mod_anc")
-
-    # Transform to Fourier basis for conditional add
-    QFT(qubits)
-    for q in qubits:
-        tosQubit(q)
-    tosQubit("_mod_anc")
-
-    # Controlled add N
-    for j in range(n):
-        divisor = 2 ** (j + 1)
-        theta = 2 * np.pi * N / divisor
-        applyGate(CP_gate(theta), "_mod_anc", qubits[j])
-
-    # Return to computational basis
-    QFT_inverse(qubits)
-    for q in qubits:
-        tosQubit(q)
-    tosQubit("_mod_anc")
-
-    # Clean up ancilla
-    measureQubit("_mod_anc")
 
 
 # =============================================================================

@@ -4,16 +4,18 @@ Grover's search algorithm implementation.
 Grover's algorithm provides quadratic speedup for unstructured search problems.
 Given a function f(x) that returns 1 for exactly one value x* (the "needle"),
 Grover's algorithm finds x* in O(√N) evaluations instead of O(N).
+
+Bit ordering convention:
+    qubits list is LSB-first: qubits[0] is bit 0 (least significant),
+    qubits[n-1] is bit n-1 (most significant). The measured integer is
+    computed as: result = sum(bit[i] * 2^i for i in range(n)).
 """
 
 import numpy as np
 from typing import List, Callable, Optional
 
-from .core import (
-    applyGate, pushQubit, measureQubit, probQubit,
-    reset, get_workspace, set_workspace, TOFFn
-)
-from .gates import H_gate, X_gate, Z_gate
+from .core import applyGate, pushQubit, measureQubit, reset, TOFFn
+from .gates import H_gate, X_gate
 
 
 def zero_phase_oracle(qubits: List[str]):
@@ -66,20 +68,26 @@ def grover_search(
     oracle: Callable[[List[str]], None],
     num_iterations: Optional[int] = None,
     verbose: bool = True
-) -> Optional[int]:
+) -> int:
     """
     Run Grover's search algorithm.
 
     Args:
-        n: Number of qubits (searches 2^n items)
+        n: Number of qubits (searches 2^n items). Must be >= 1.
         oracle: Function that applies phase flip to marked states.
                 Takes list of qubit names as argument.
         num_iterations: Number of Grover iterations (default: optimal ~π√N/4)
         verbose: If True, print progress
 
     Returns:
-        Measured result (integer), or None if search failed
+        Measured result as integer (0 to 2^n - 1)
+
+    Raises:
+        ValueError: If n < 1
     """
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+
     reset()
 
     # Calculate optimal number of iterations if not specified
@@ -134,12 +142,20 @@ def create_single_target_oracle(target: int, n: int) -> Callable[[List[str]], No
     Create an oracle that marks a single target value.
 
     Args:
-        target: The value to search for
-        n: Number of qubits
+        target: The value to search for (0 to 2^n - 1)
+        n: Number of qubits. Must be >= 1.
 
     Returns:
         Oracle function that can be passed to grover_search
+
+    Raises:
+        ValueError: If n < 1 or target out of range
     """
+    if n < 1:
+        raise ValueError(f"n must be >= 1, got {n}")
+    if not (0 <= target < 2 ** n):
+        raise ValueError(f"target must be in [0, {2**n - 1}], got {target}")
+
     def oracle(qubits: List[str]):
         # Apply X to qubits where target bit is 0
         for i, q in enumerate(qubits):
@@ -159,17 +175,20 @@ def create_single_target_oracle(target: int, n: int) -> Callable[[List[str]], No
     return oracle
 
 
-def grover_search_for_value(n: int, target: int, verbose: bool = True) -> Optional[int]:
+def grover_search_for_value(n: int, target: int, verbose: bool = True) -> int:
     """
     Convenience function to search for a specific value.
 
     Args:
-        n: Number of qubits
+        n: Number of qubits. Must be >= 1.
         target: Value to search for (0 to 2^n - 1)
         verbose: If True, print progress
 
     Returns:
         Measured result (should equal target with high probability)
+
+    Raises:
+        ValueError: If n < 1 or target out of range
     """
     oracle = create_single_target_oracle(target, n)
     return grover_search(n, oracle, verbose=verbose)

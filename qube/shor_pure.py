@@ -162,8 +162,9 @@ def controlled_modular_subtract_constant(ctrl: str, qubits: List[str],
     When ctrl=|1>: qubits -> (qubits - constant) mod N
     When ctrl=|0>: qubits unchanged
 
-    Uses the Beauregard circuit with proper ancilla uncomputation to preserve
-    quantum superposition in the control qubit.
+    Uses the identity: (a - c) mod N = (a + (N - c)) mod N
+    This delegates to controlled_modular_add_constant which has correct
+    ancilla uncomputation.
 
     Args:
         ctrl: Control qubit name
@@ -171,71 +172,10 @@ def controlled_modular_subtract_constant(ctrl: str, qubits: List[str],
         constant: Classical integer to subtract
         N: Modulus
     """
-    # Step 1: Transform to Fourier basis
-    QFT(qubits)
-    _normalize_qubits(qubits)
-
-    # Step 2: Controlled subtract constant
-    controlled_phi_add_constant(ctrl, qubits, constant, inverse=True)
-
-    # Step 3: Back to computational basis for sign check
-    QFT_inverse(qubits)
-    _normalize_qubits(qubits)
-
-    # At this point:
-    # - If ctrl=0: register unchanged
-    # - If ctrl=1: register = a - constant (mod 2^n)
-    #   MSB=1 means a < constant (underflow)
-
-    # Step 4: Copy MSB to ancilla (controlled on ctrl)
-    pushQubit("_cms_anc", [1, 0])
-    applyGate(TOFF_gate, ctrl, qubits[0], "_cms_anc")
-
-    # Step 5: Add N controlled on ancilla
-    QFT(qubits)
-    _normalize_qubits(qubits)
-    tosQubit("_cms_anc")
-    controlled_phi_add_constant("_cms_anc", qubits, N)
-
-    # Step 6: Uncompute ancilla
-    # Add constant back, then XOR with MSB
-    #
-    # Analysis for subtract a - c mod N:
-    # - No underflow (a >= c): after -c, result = a-c, MSB=0 (for valid inputs), anc=0
-    #   After +c: result = a, MSB depends on a (typically 0)
-    # - Underflow (a < c): after -c+N, result = a-c+N, anc=1
-    #   After +c: result = a-c+N+c = a+N >= N, so wraps: result = a+N (could have MSB=0 or 1)
-    #   Actually for N < 2^(n-1), a+N < 2^n, so no wrap and MSB depends on value
-    #
-    # The key: for underflow case, a+N has MSB=1 iff a+N >= 2^(n-1)
-    # Since N is about 2^(n-1), a+N is roughly 2^(n-1) to 2^n, so MSB is often 1.
-    #
-    # For a < c (underflow), a is small, so a+N is close to N, MSB likely 1 if N >= 2^(n-1)
-    # For a >= c (no underflow), a after +c is original a, MSB likely 0 if a < 2^(n-1)
-    #
-    # XOR rule: anc XOR (ctrl AND MSB)
-    # - No underflow: anc=0, MSB~0 -> 0 XOR 0 = 0 OK
-    # - Underflow: anc=1, MSB~1 -> 1 XOR 1 = 0 OK
-    controlled_phi_add_constant(ctrl, qubits, constant)
-
-    QFT_inverse(qubits)
-    _normalize_qubits(qubits)
-    tosQubit("_cms_anc")
-
-    # XOR with ctrl AND MSB (not NOT MSB!)
-    applyGate(TOFF_gate, ctrl, qubits[0], "_cms_anc")
-
-    # Step 7: Subtract constant again to restore correct result
-    QFT(qubits)
-    _normalize_qubits(qubits)
-    tosQubit("_cms_anc")
-    controlled_phi_add_constant(ctrl, qubits, constant, inverse=True)
-    QFT_inverse(qubits)
-    _normalize_qubits(qubits)
-    tosQubit("_cms_anc")
-
-    # Ancilla should be |0> - safe to measure
-    measureQubit("_cms_anc")
+    k = (-constant) % N
+    if k == 0:
+        return
+    controlled_modular_add_constant(ctrl, qubits, k, N)
 
 
 # =============================================================================
@@ -312,22 +252,18 @@ def doubly_controlled_modular_subtract_constant(ctrl1: str, ctrl2: str,
 
     Only subtracts when both ctrl1=|1> AND ctrl2=|1>.
 
+    Uses the identity: (a - c) mod N = (a + (N - c)) mod N
+
     Args:
         ctrl1, ctrl2: Control qubit names
         qubits: List of qubit names [MSB, ..., LSB]
         constant: Classical integer to subtract
         N: Modulus
     """
-    pushQubit("_dcms_ctrl", [1, 0])
-    tosQubit("_dcms_ctrl")
-
-    applyGate(TOFF_gate, ctrl1, ctrl2, "_dcms_ctrl")
-
-    controlled_modular_subtract_constant("_dcms_ctrl", qubits, constant, N)
-
-    applyGate(TOFF_gate, ctrl1, ctrl2, "_dcms_ctrl")
-
-    measureQubit("_dcms_ctrl")
+    k = (-constant) % N
+    if k == 0:
+        return
+    doubly_controlled_modular_add_constant(ctrl1, ctrl2, qubits, k, N)
 
 
 # =============================================================================
